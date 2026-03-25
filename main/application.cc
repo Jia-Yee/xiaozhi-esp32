@@ -218,11 +218,17 @@ void Application::Run() {
         }
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
+            ESP_LOGI(TAG, "=== DEBUG: MAIN_EVENT_SEND_AUDIO received, state=%d ===", (int)GetDeviceState());
+            int packet_count = 0;
             while (auto packet = audio_service_.PopPacketFromSendQueue()) {
+                packet_count++;
+                ESP_LOGI(TAG, "=== DEBUG: Sending audio packet #%d to server ===", packet_count);
                 if (protocol_ && !protocol_->SendAudio(std::move(packet))) {
+                    ESP_LOGE(TAG, "=== DEBUG: Failed to send audio packet #%d ===", packet_count);
                     break;
                 }
             }
+            ESP_LOGI(TAG, "=== DEBUG: Total packets sent: %d ===", packet_count);
         }
 
         if (bits & MAIN_EVENT_WAKE_WORD_DETECTED) {
@@ -477,10 +483,10 @@ void Application::InitializeProtocol() {
 
     display->SetStatus(Lang::Strings::LOADING_PROTOCOL);
 
-    // 强制使用 MQTT 协议，忽略 OTA/NVS 中的配置
-    ESP_LOGW(TAG, "=== FORCE: Using MQTT protocol with local server ===");
+    // 强制使用 WebSocket 协议，忽略 OTA/NVS 中的配置
+    ESP_LOGW(TAG, "=== FORCE: Using WebSocket protocol with local server ===");
     ESP_LOGW(TAG, "=== FORCE: Current state=%d ===", state_machine_.GetState());
-    protocol_ = std::make_unique<MqttProtocol>();
+    protocol_ = std::make_unique<WebsocketProtocol>();
     protocol_->OnConnected([this]() {
         DismissAlert();
     });

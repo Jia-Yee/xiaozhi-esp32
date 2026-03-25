@@ -62,6 +62,7 @@ bool WebsocketProtocol::SendText(const std::string& text) {
         return false;
     }
 
+    ESP_LOGI(TAG, "=== DEBUG: SendText message: %s ===", text.c_str());
     if (!websocket_->Send(text)) {
         ESP_LOGE(TAG, "Failed to send text: %s", text.c_str());
         SetError(Lang::Strings::SERVER_ERROR);

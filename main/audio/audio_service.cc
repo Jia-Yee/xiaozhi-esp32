@@ -99,6 +99,7 @@ void AudioService::Initialize(AudioCodec* codec) {
 #endif
 
     audio_processor_->OnOutput([this](std::vector<int16_t>&& data) {
+        ESP_LOGI(TAG, "=== DEBUG: Audio processor output %d samples ===", (int)data.size());
         PushTaskToEncodeQueue(kAudioTaskTypeEncodeToSendQueue, std::move(data));
     });
 
@@ -269,7 +270,7 @@ void AudioService::AudioInputTask() {
         if (bits & (AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING)) {
             int samples = 160; // 10ms
             std::vector<int16_t> data;
-            if (ReadAudioData(data, 16000, samples)) {
+            if (ReadAudioData(data, encoder_sample_rate_, samples)) {
                 if (bits & AS_EVENT_WAKE_WORD_RUNNING) {
                     wake_word_->Feed(data);
                 }
@@ -400,10 +401,11 @@ void AudioService::OpusCodecTask() {
 
             auto packet = std::make_unique<AudioStreamPacket>();
             packet->frame_duration = OPUS_FRAME_DURATION_MS;
-            packet->sample_rate = 16000;
+            packet->sample_rate = encoder_sample_rate_;
             packet->timestamp = task->timestamp;
 
             if (opus_encoder_ != nullptr && task->pcm.size() == encoder_frame_size_) {
+                ESP_LOGI(TAG, "=== DEBUG: Encoding audio frame %d samples ===", (int)task->pcm.size());
                 std::vector<uint8_t> buf(encoder_outbuf_size_);
                 esp_audio_enc_in_frame_t in = {
                     .buffer = (uint8_t *)(task->pcm.data()),
@@ -417,13 +419,16 @@ void AudioService::OpusCodecTask() {
                 auto ret = esp_opus_enc_process(opus_encoder_, &in, &out);
                 if (ret == ESP_AUDIO_ERR_OK) {
                     packet->payload.assign(buf.data(), buf.data() + out.encoded_bytes);
+                    ESP_LOGI(TAG, "=== DEBUG: Encoded to %d bytes ===", (int)out.encoded_bytes);
 
                     if (task->type == kAudioTaskTypeEncodeToSendQueue) {
                         {
                             std::lock_guard<std::mutex> lock2(audio_queue_mutex_);
                             audio_send_queue_.push_back(std::move(packet));
+                            ESP_LOGI(TAG, "=== DEBUG: Pushed to send queue, queue size=%u ===", audio_send_queue_.size());
                         }
                         if (callbacks_.on_send_queue_available) {
+                            ESP_LOGI(TAG, "=== DEBUG: Notifying callback ===");
                             callbacks_.on_send_queue_available();
                         }
                     } else if (task->type == kAudioTaskTypeEncodeToTestingQueue) {
