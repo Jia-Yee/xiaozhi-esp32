@@ -70,6 +70,32 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
     int keepalive_interval = settings.GetInt("keepalive", 240);
     publish_topic_ = settings.GetString("publish_topic");
 
+    // 强制清除 NVS 中的旧配置，始终使用本地服务器
+    if (!endpoint.empty()) {
+        ESP_LOGW(TAG, "=== FORCE: Clearing old NVS MQTT config: %s ===", endpoint.c_str());
+        settings.EraseAll();
+    }
+
+    // 强制使用本地 MQTT 服务器（不再从其他配置源读取）
+    endpoint = "192.168.3.231";
+    ESP_LOGI(TAG, "=== FORCE: Using local MQTT server: %s ===", endpoint.c_str());
+
+    // 如果未配置 endpoint，尝试从 wifi 命名空间读取（配网页面保存的位置）
+    if (endpoint.empty()) {
+        Settings wifi_settings("wifi", false);
+        endpoint = wifi_settings.GetString("mqtt_endpoint");
+        if (!endpoint.empty()) {
+            ESP_LOGI(TAG, "Using MQTT endpoint from wifi config: %s", endpoint.c_str());
+        }
+    }
+
+    // 如果还是没有 endpoint，使用默认服务器
+    if (endpoint.empty()) {
+        // Default to local MQTT server for better performance and privacy
+        endpoint = "192.168.3.231";
+        ESP_LOGI(TAG, "Using default MQTT endpoint: %s", endpoint.c_str());
+    }
+
     if (endpoint.empty()) {
         ESP_LOGW(TAG, "MQTT endpoint is not specified");
         if (report_error) {

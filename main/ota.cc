@@ -146,6 +146,9 @@ esp_err_t Ota::CheckVersion() {
     has_mqtt_config_ = false;
     cJSON *mqtt = cJSON_GetObjectItem(root, "mqtt");
     if (cJSON_IsObject(mqtt)) {
+        // 强制使用本地服务器，不保存 OTA 返回的 MQTT 配置
+        ESP_LOGW(TAG, "=== FORCE: Ignoring OTA MQTT config, using local server ===");
+        /*
         Settings settings("mqtt", true);
         cJSON *item = NULL;
         cJSON_ArrayForEach(item, mqtt) {
@@ -160,6 +163,7 @@ esp_err_t Ota::CheckVersion() {
             }
         }
         has_mqtt_config_ = true;
+        */
     } else {
         ESP_LOGI(TAG, "No mqtt section found !");
     }
@@ -167,6 +171,9 @@ esp_err_t Ota::CheckVersion() {
     has_websocket_config_ = false;
     cJSON *websocket = cJSON_GetObjectItem(root, "websocket");
     if (cJSON_IsObject(websocket)) {
+        // 强制使用本地服务器，不保存 OTA 返回的 WebSocket 配置
+        ESP_LOGW(TAG, "=== FORCE: Ignoring OTA websocket config, using local server ===");
+        /*
         Settings settings("websocket", true);
         cJSON *item = NULL;
         cJSON_ArrayForEach(item, websocket) {
@@ -181,6 +188,7 @@ esp_err_t Ota::CheckVersion() {
             }
         }
         has_websocket_config_ = true;
+        */
     } else {
         ESP_LOGI(TAG, "No websocket section found!");
     }

@@ -1,0 +1,4 @@
+dependencies:
+  78/uart-eth-modem:
+    version: "~0.3.3"
+    override_path: "managed_components/78__uart-eth-modem"

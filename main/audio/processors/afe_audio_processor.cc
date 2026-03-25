@@ -154,11 +154,14 @@ void AfeAudioProcessor::AudioProcessorTask() {
 
         // VAD state change
         if (vad_state_change_callback_) {
+            ESP_LOGV(TAG, "=== DEBUG: AFE VAD state=%d, is_speaking_=%d ===", res->vad_state, is_speaking_);
             if (res->vad_state == VAD_SPEECH && !is_speaking_) {
                 is_speaking_ = true;
+                ESP_LOGI(TAG, "=== DEBUG: VAD detected SPEECH ===");
                 vad_state_change_callback_(true);
             } else if (res->vad_state == VAD_SILENCE && is_speaking_) {
                 is_speaking_ = false;
+                ESP_LOGI(TAG, "=== DEBUG: VAD detected SILENCE ===");
                 vad_state_change_callback_(false);
             }
         }

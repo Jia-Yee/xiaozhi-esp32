@@ -85,9 +85,41 @@ bool WebsocketProtocol::OpenAudioChannel() {
     std::string url = settings.GetString("url");
     std::string token = settings.GetString("token");
     int version = settings.GetInt("version");
+    
+    // 强制清除 NVS 中的旧配置，始终使用本地服务器
+    if (!url.empty()) {
+        ESP_LOGW(TAG, "=== FORCE: Clearing old NVS config: %s ===", url.c_str());
+        settings.EraseAll();
+    }
+    
+    // 如果未配置 URL，尝试从 wifi 命名空间读取（配网页面保存的位置）
+    if (url.empty()) {
+        Settings wifi_settings("wifi", false);
+        url = wifi_settings.GetString("websocket_url");
+        if (!url.empty()) {
+            ESP_LOGI(TAG, "Using WebSocket URL from wifi config: %s", url.c_str());
+        }
+    }
+    
+    // 如果还是没有 URL，使用默认服务器
+    if (url.empty()) {
+        // 强制使用本地 WebSocket 服务器，不使用 xiaozhi.me API
+        url = "ws://192.168.3.231:8080";
+        ESP_LOGI(TAG, "=== FORCE: Using local WebSocket server: %s ===", url.c_str());
+    } else {
+        // 总是替换为本地服务器，忽略任何远程配置
+        ESP_LOGW(TAG, "=== FORCE: Found config URL in NVS/OTA: %s, REPLACING with local server ===", url.c_str());
+        url = "ws://192.168.3.231:8080";
+        ESP_LOGI(TAG, "=== FORCE: Now using local server: %s ===", url.c_str());
+    }
+    
+    // 初始化协议版本，默认为 1（原始 Opus 数据）
     if (version != 0) {
         version_ = version;
+    } else {
+        version_ = 1;  // Default to version 1 (raw Opus without binary header)
     }
+    ESP_LOGI(TAG, "Using protocol version: %d", version_);
 
     error_occurred_ = false;
 
@@ -110,14 +142,17 @@ bool WebsocketProtocol::OpenAudioChannel() {
     websocket_->SetHeader("Client-Id", Board::GetInstance().GetUuid().c_str());
 
     websocket_->OnData([this](const char* data, size_t len, bool binary) {
+        ESP_LOGI(TAG, "=== DEBUG: Received %s message, len=%zu ===", binary ? "BINARY" : "JSON", len);
         if (binary) {
             if (on_incoming_audio_ != nullptr) {
+                ESP_LOGI(TAG, "=== DEBUG: Processing binary audio data, version_=%d ===", version_);
                 if (version_ == 2) {
                     BinaryProtocol2* bp2 = (BinaryProtocol2*)data;
                     bp2->version = ntohs(bp2->version);
                     bp2->type = ntohs(bp2->type);
                     bp2->timestamp = ntohl(bp2->timestamp);
                     bp2->payload_size = ntohl(bp2->payload_size);
+                    ESP_LOGI(TAG, "=== DEBUG: Protocol v2 - type=%d, payload_size=%d ===", bp2->type, bp2->payload_size);
                     auto payload = (uint8_t*)bp2->payload;
                     on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
                         .sample_rate = server_sample_rate_,
@@ -129,6 +164,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
                     BinaryProtocol3* bp3 = (BinaryProtocol3*)data;
                     bp3->type = bp3->type;
                     bp3->payload_size = ntohs(bp3->payload_size);
+                    ESP_LOGI(TAG, "=== DEBUG: Protocol v3 - type=%d, payload_size=%d ===", bp3->type, bp3->payload_size);
                     auto payload = (uint8_t*)bp3->payload;
                     on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
                         .sample_rate = server_sample_rate_,
@@ -137,6 +173,11 @@ bool WebsocketProtocol::OpenAudioChannel() {
                         .payload = std::vector<uint8_t>(payload, payload + bp3->payload_size)
                     }));
                 } else {
+                    ESP_LOGI(TAG, "=== DEBUG: Protocol v1 - raw Opus data, len=%d bytes ===", (int)len);
+                    // Log first 32 bytes for debugging
+                    if (len > 0) {
+                        ESP_LOG_BUFFER_HEX_LEVEL(TAG, data, len > 32 ? 32 : len, ESP_LOG_INFO);
+                    }
                     on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
                         .sample_rate = server_sample_rate_,
                         .frame_duration = server_frame_duration_,
@@ -147,6 +188,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
             }
         } else {
             // Parse JSON data
+            ESP_LOGI(TAG, "=== DEBUG: Received JSON: %.*s ===", (int)len, data);
             auto root = cJSON_Parse(data);
             auto type = cJSON_GetObjectItem(root, "type");
             if (cJSON_IsString(type)) {
@@ -172,6 +214,7 @@ bool WebsocketProtocol::OpenAudioChannel() {
         }
     });
 
+    ESP_LOGI(TAG, "=== DEBUG: url variable value: %s ===", url.c_str());
     ESP_LOGI(TAG, "Connecting to websocket server: %s with version: %d", url.c_str(), version_);
     if (!websocket_->Connect(url.c_str())) {
         ESP_LOGE(TAG, "Failed to connect to websocket server, code=%d", websocket_->GetLastError());
@@ -242,12 +285,15 @@ void WebsocketProtocol::ParseServerHello(const cJSON* root) {
     if (cJSON_IsObject(audio_params)) {
         auto sample_rate = cJSON_GetObjectItem(audio_params, "sample_rate");
         if (cJSON_IsNumber(sample_rate)) {
+            ESP_LOGI(TAG, "=== DEBUG: Server audio_params sample_rate=%d (old: %d) ===", sample_rate->valueint, server_sample_rate_);
             server_sample_rate_ = sample_rate->valueint;
         }
         auto frame_duration = cJSON_GetObjectItem(audio_params, "frame_duration");
         if (cJSON_IsNumber(frame_duration)) {
+            ESP_LOGI(TAG, "=== DEBUG: Server audio_params frame_duration=%d (old: %d) ===", frame_duration->valueint, server_frame_duration_);
             server_frame_duration_ = frame_duration->valueint;
         }
+        ESP_LOGI(TAG, "=== DEBUG: Final audio params - sample_rate=%d, frame_duration=%d ===", server_sample_rate_, server_frame_duration_);
     }
 
     xEventGroupSetBits(event_group_handle_, WEBSOCKET_PROTOCOL_SERVER_HELLO_EVENT);
